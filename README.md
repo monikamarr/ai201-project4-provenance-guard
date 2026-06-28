@@ -176,25 +176,39 @@ Example audit entry:
 
 ## Signal 1 — Groq LLM
 
-The first detection signal uses the **Groq Llama 3.3 70B Versatile** model. Submitted text is analyzed by the LLM, which returns:
+The primary detection signal uses the **Groq Llama 3.3 70B Versatile** model.
 
-* AI-likeness score (0.0–1.0)
-* Attribution
-* Explanation
+### What it measures
+
+The LLM evaluates overall linguistic patterns such as tone, sentence structure, phrasing, consistency, and characteristics commonly associated with AI-generated writing.
+
+### Why I chose it
+
+An LLM can recognize broader language patterns that are difficult to capture using simple handcrafted rules, making it a strong primary detector.
+
+### What it misses
+
+The LLM may incorrectly classify highly polished human writing or AI-generated text that has been substantially edited by a person.
 
 ---
 
 ## Signal 2 — Stylometric Analysis
 
-The second detection signal computes simple writing-style metrics:
+The second signal performs a lightweight statistical analysis of the writing style.
 
-* Average sentence length
-* Sentence length variance
-* Type-token ratio (vocabulary diversity)
+It measures:
 
-These metrics are combined into a stylometric score between 0.0 and 1.0.
+- Average sentence length
+- Sentence-length variance
+- Type-token ratio (vocabulary diversity)
 
----
+### Why I chose it
+
+These metrics provide an independent signal that can either reinforce or moderate the LLM's prediction while remaining easy to interpret.
+
+### What it misses
+
+Stylometric statistics measure only observable writing characteristics. They cannot understand meaning, context, or author intent, and therefore should not be used as a standalone attribution method.
 
 ## Combined Confidence
 
