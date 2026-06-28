@@ -344,3 +344,116 @@ These limits allow normal use by individual writers while helping prevent automa
 ```
 
 The first ten requests succeeded. The final two requests exceeded the configured limit and returned HTTP 429 (Too Many Requests).
+
+## Transparency Labels
+
+The API returns one of three transparency label variants depending on the combined confidence score.
+
+### High-confidence AI
+
+```
+Likely AI-generated (combined confidence: X.XX). This classification is based on a high AI-likeness score from the LLM signal, supported by stylometric analysis. The result is not final and may be appealed.
+```
+
+### High-confidence Human
+
+```
+Likely human-written (combined confidence: X.XX). This classification is based on a low AI-likeness score from the combined detection signals. The result is not final and may be appealed.
+```
+
+### Uncertain
+
+```
+Uncertain origin (combined confidence: X.XX). The detection signals did not provide enough confidence to classify the text as clearly human-written or AI-generated. Human review may be needed.
+```
+
+---
+
+# Confidence Scoring Design
+
+The final confidence score combines two independent detection signals.
+
+* **80%** LLM detection score
+* **20%** Stylometric heuristic score
+
+The LLM receives the greater weight because it evaluates many linguistic patterns beyond the simple statistics captured by the stylometric detector. The stylometric analysis serves as a secondary signal that can either reinforce or slightly moderate the LLM's prediction without dominating the final decision.
+
+This weighted approach was chosen because the LLM generally provides a stronger overall assessment while the stylometric metrics offer additional transparency into measurable characteristics of the writing.
+
+If this system were deployed in production, I would likely replace the fixed weighting with a learned ensemble model trained on labeled examples. That approach could better calibrate confidence scores across many writing styles and domains.
+
+## Example Confidence Scores
+
+### High-confidence AI Example
+
+| Metric      |               Value |
+| ----------- | ------------------: |
+| Attribution | Likely AI-generated |
+| Confidence  |                0.68 |
+
+### High-confidence Human Example
+
+| Metric      |                Value |
+| ----------- | -------------------: |
+| Attribution | Likely human-written |
+| Confidence  |                 0.16 |
+
+These examples demonstrate that the scoring pipeline produces meaningful variation across different writing samples rather than assigning nearly identical confidence values to every submission.
+
+---
+
+# Architecture Design
+
+The application separates each stage of the attribution pipeline into independent components.
+
+1. Client submits text using the `/submit` endpoint.
+2. The Groq LLM produces an AI-likeness score.
+3. The stylometric analyzer computes writing-style metrics.
+4. The confidence combiner merges both signals into a single confidence score.
+5. A transparency label is generated based on the confidence score.
+6. The classification is recorded in the structured audit log.
+7. If requested, creators may submit an appeal using the `/appeal` endpoint.
+
+This modular architecture makes it easy to improve or replace individual detection signals without changing the remainder of the application. The confidence combiner serves as a simple integration layer while preserving each individual score for transparency.
+
+---
+
+# Known Limitations
+
+The current implementation combines one LLM detector with a simple stylometric heuristic.
+
+One type of writing that may be misclassified is carefully edited academic or technical writing produced by humans. Such writing often contains long, consistent sentence structures and formal vocabulary that resemble AI-generated text, increasing both the LLM and stylometric scores.
+
+Conversely, AI-generated text that has been extensively edited to include conversational language, varied sentence lengths, or personal experiences may receive a lower AI confidence score than expected.
+
+The stylometric detector intentionally uses only a small number of writing statistics and does not analyze deeper linguistic features such as discourse structure, syntax, or semantic consistency.
+
+Therefore, the system should be viewed as a decision-support tool rather than a definitive authorship detector.
+
+---
+
+# Specification Reflection
+
+The project specification helped guide the implementation by dividing the system into manageable milestones. Building one detection signal at a time before combining them made the overall architecture easier to design, test, and debug.
+
+One area where my implementation differs slightly from the specification is the appeals workflow. Rather than only updating the original classification record, the system both updates the original entry to **under_review** and creates a separate appeal event in the audit log. This preserves a complete history of actions and more closely resembles how production audit logging systems maintain traceability.
+
+---
+
+# AI Usage
+
+AI tools were used throughout development as programming assistants rather than as automatic code generators.
+
+## Example 1
+
+I used ChatGPT to help implement the Groq API integration and the JSON parsing logic for the LLM detection signal.
+
+After reviewing the generated code, I modified the prompt to encourage consistent JSON responses and added fallback handling for cases where the model returned invalid JSON.
+
+## Example 2
+
+I used ChatGPT to help implement the Flask-Limiter configuration, confidence-based transparency labels, and the appeals workflow.
+
+After reviewing the generated code, I revised the audit logging implementation so that appeals both update the original classification entry and create a separate appeal event, providing a more complete audit trail.
+
+Throughout the project, all AI-generated suggestions were reviewed, tested, and modified before being incorporated into the final implementation.
