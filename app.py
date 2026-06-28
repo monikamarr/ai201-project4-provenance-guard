@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 import os
 import json
 import uuid
+import re
+import statistics
 
 load_dotenv()
 
@@ -83,6 +85,98 @@ Text:
     }
 
 
+def stylometric_signal(text):
+    """
+    Second detection signal:
+    Uses simple writing-style metrics to estimate AI-likeness.
+    Higher score = more AI-like.
+    """
+
+    sentences = re.split(r"[.!?]+", text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    words = re.findall(r"\b\w+\b", text.lower())
+
+    if not words or not sentences:
+        return {
+            "signal": "stylometric",
+            "score": 0.5,
+            "metrics": {},
+            "explanation": "Not enough text to compute stylometric metrics."
+        }
+
+    sentence_lengths = [
+        len(re.findall(r"\b\w+\b", sentence))
+        for sentence in sentences
+    ]
+
+    avg_sentence_length = sum(sentence_lengths) / len(sentence_lengths)
+
+    if len(sentence_lengths) > 1:
+        sentence_length_variance = statistics.variance(sentence_lengths)
+    else:
+        sentence_length_variance = 0
+
+    unique_words = set(words)
+    type_token_ratio = len(unique_words) / len(words)
+
+    score = 0
+
+    if avg_sentence_length >= 18:
+        score += 0.35
+    elif avg_sentence_length >= 12:
+        score += 0.2
+
+    if sentence_length_variance <= 10:
+        score += 0.35
+    elif sentence_length_variance <= 25:
+        score += 0.2
+
+    if type_token_ratio <= 0.55:
+        score += 0.3
+    elif type_token_ratio <= 0.7:
+        score += 0.15
+
+    score = max(0.0, min(1.0, score))
+
+    return {
+        "signal": "stylometric",
+        "score": round(score, 2),
+        "metrics": {
+            "avg_sentence_length": round(avg_sentence_length, 2),
+            "sentence_length_variance": round(sentence_length_variance, 2),
+            "type_token_ratio": round(type_token_ratio, 2)
+        },
+        "explanation": "Score based on sentence length, sentence variation, and vocabulary diversity."
+    }
+
+
+def combine_signals(llm_score, stylometric_score):
+    """
+    Combines both signals into one confidence score.
+    LLM signal is weighted more heavily because it is the primary detector.
+    """
+
+    combined_score = (0.8 * llm_score) + (0.2 * stylometric_score)
+    combined_score = round(combined_score, 2)
+
+    if combined_score >= 0.6:
+        attribution = "likely_ai"
+        label = "Likely AI-generated"
+    elif combined_score <= 0.39:
+        attribution = "likely_human"
+        label = "Likely human-written"
+    else:
+        attribution = "uncertain"
+        label = "Uncertain origin"
+
+    return {
+        "confidence": combined_score,
+        "attribution": attribution,
+        "label": label
+    }
+
+
 def load_log():
     if not os.path.exists(LOG_FILE):
         return []
@@ -112,7 +206,7 @@ def submit():
     text = data.get("text")
     creator_id = data.get("creator_id")
 
-    if not text:
+    if not text or not text.strip():
         return jsonify({"error": "Missing required field: text"}), 400
 
     if not creator_id:
@@ -120,26 +214,48 @@ def submit():
 
     content_id = str(uuid.uuid4())
 
-    llm_result = classify_with_groq(text)
+    try:
+        llm_result = classify_with_groq(text)
+    except Exception as e:
+        llm_result = {
+            "signal": "llm",
+            "score": 0.5,
+            "attribution": "uncertain",
+            "explanation": f"LLM signal failed: {str(e)}"
+        }
 
-    confidence = llm_result["score"]
+    stylometric_result = stylometric_signal(text)
+
+    combined_result = combine_signals(
+        llm_result["score"],
+        stylometric_result["score"]
+    )
+
+    confidence = combined_result["confidence"]
+    attribution = combined_result["attribution"]
 
     label = (
-    f"Classification: {llm_result['attribution']} "
-    f"(confidence: {confidence:.2f}). "
-    "Transparency labels will be expanded in Milestone 4."
+        f"{combined_result['label']} "
+        f"(combined confidence: {confidence:.2f}). "
+        "This result is based on an LLM signal and a stylometric signal."
     )
 
     response = {
         "content_id": content_id,
         "creator_id": creator_id,
-        "attribution": llm_result["attribution"],
+        "attribution": attribution,
         "confidence": confidence,
         "label": label,
         "signals": {
             "llm": {
                 "score": llm_result["score"],
+                "attribution": llm_result["attribution"],
                 "explanation": llm_result["explanation"]
+            },
+            "stylometric": {
+                "score": stylometric_result["score"],
+                "metrics": stylometric_result["metrics"],
+                "explanation": stylometric_result["explanation"]
             }
         },
         "status": "classified"
@@ -149,9 +265,11 @@ def submit():
         "content_id": content_id,
         "creator_id": creator_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "attribution": llm_result["attribution"],
+        "attribution": attribution,
         "confidence": confidence,
         "llm_score": llm_result["score"],
+        "stylometric_score": stylometric_result["score"],
+        "stylometric_metrics": stylometric_result["metrics"],
         "status": "classified"
     }
 
@@ -172,4 +290,4 @@ def home():
 
 
 if __name__ == "__main__":
-     app.run(debug=True, port=5001)
+    app.run(debug=True, port=5001)

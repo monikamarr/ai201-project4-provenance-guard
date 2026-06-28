@@ -1,18 +1,25 @@
-# ai201-project4-provenance-guard# Provenance Guard
+# Provenance Guard
 
 **AI201 – Project 4**
 
-Provenance Guard is a Flask-based REST API that analyzes submitted text and estimates whether it is likely human-written or AI-generated. The application uses the Groq API (Llama 3.3 70B Versatile) as its first detection signal and maintains a structured audit log for transparency.
+Provenance Guard is a Flask-based REST API that estimates whether submitted text is likely human-written or AI-generated. The system combines two independent detection signals—a large language model (LLM) assessment and a stylometric analysis—to produce a single confidence score and attribution label. Every submission is recorded in a structured audit log for transparency.
 
 ---
 
 # Features
 
-* REST API built with Flask
-* POST endpoint for text submission
-* Groq LLM-based attribution detection
-* Unique content ID generated for every submission
-* Confidence score and attribution result returned
+* Flask REST API
+* POST endpoint for text attribution
+* Two independent detection signals:
+
+  * **Groq Llama 3.3 70B Versatile**
+  * **Stylometric heuristic analysis**
+* Combined confidence scoring
+* Three attribution categories:
+
+  * Likely AI-generated
+  * Uncertain
+  * Likely human-written
 * Structured JSON audit log
 * Endpoint to retrieve recent audit log entries
 
@@ -37,7 +44,7 @@ git clone <repository-url>
 cd ai201-project4-provenance-guard
 ```
 
-Create a virtual environment.
+Create and activate a virtual environment.
 
 ```bash
 python3 -m venv .venv
@@ -62,7 +69,7 @@ Run the application.
 python app.py
 ```
 
-The server runs on:
+The server runs at:
 
 ```
 http://localhost:5001
@@ -88,9 +95,9 @@ Health check endpoint.
 
 ## POST /submit
 
-Accepts submitted text and returns an attribution assessment.
+Submits text for attribution analysis.
 
-### Required JSON Fields
+### Required JSON
 
 | Field      | Type   |
 | ---------- | ------ |
@@ -105,7 +112,7 @@ Accepts submitted text and returns an attribution assessment.
 curl -s -X POST http://localhost:5001/submit \
 -H "Content-Type: application/json" \
 -d '{
-"text":"In conclusion, artificial intelligence offers numerous benefits across multiple sectors, including healthcare, education, finance, and transportation. By leveraging advanced algorithms, organizations can optimize workflows, enhance productivity, and drive innovation in an increasingly competitive global landscape.",
+"text":"Artificial intelligence represents a transformative paradigm shift in modern society. It is important to note that while the benefits of AI are numerous, it is equally essential to consider the ethical implications. Furthermore, stakeholders across various sectors must collaborate to ensure responsible deployment.",
 "creator_id":"test-ai-1"
 }' | python -m json.tool
 ```
@@ -114,15 +121,18 @@ curl -s -X POST http://localhost:5001/submit \
 
 ```json
 {
-    "attribution": "likely_ai",
-    "confidence": 0.8,
-    "content_id": "01ffbd56-d55e-4635-9a0e-bbc55905a717",
+    "content_id": "230a5bc1-b733-4266-9360-8bb1c4d391f2",
     "creator_id": "test-ai-1",
-    "label": "Classification: likely_ai (confidence: 0.80). Transparency labels will be expanded in Milestone 4.",
+    "attribution": "likely_ai",
+    "confidence": 0.68,
+    "label": "Likely AI-generated (combined confidence: 0.68). This result is based on an LLM signal and a stylometric signal.",
     "signals": {
         "llm": {
             "score": 0.8,
-            "explanation": "The writing is highly structured, generic, and exhibits characteristics commonly associated with AI-generated text."
+            "attribution": "likely_ai"
+        },
+        "stylometric": {
+            "score": 0.2
         }
     },
     "status": "classified"
@@ -131,84 +141,102 @@ curl -s -X POST http://localhost:5001/submit \
 
 ---
 
+# Detection Pipeline
+
+## Signal 1 — Groq LLM
+
+The first detection signal uses the **Groq Llama 3.3 70B Versatile** model.
+
+The model receives submitted text and returns:
+
+* AI-likeness score
+* attribution
+* explanation
+
+---
+
+## Signal 2 — Stylometric Analysis
+
+The second signal computes writing-style metrics including:
+
+* Average sentence length
+* Sentence length variance
+* Type-token ratio (vocabulary diversity)
+
+These metrics are combined into a stylometric score between **0.0** and **1.0**.
+
+---
+
+## Combined Confidence
+
+The final confidence score combines both signals:
+
+* **80%** LLM score
+* **20%** stylometric score
+
+Final labels are assigned using the combined confidence:
+
+| Confidence | Attribution          |
+| ---------- | -------------------- |
+| ≥ 0.60     | Likely AI-generated  |
+| 0.40–0.59  | Uncertain            |
+| ≤ 0.39     | Likely human-written |
+
+---
+
 # Audit Log
 
-Each submission is written to `audit_log.json`.
-
-Each log entry contains:
+Every submission creates a structured audit record containing:
 
 * content ID
 * creator ID
 * timestamp
-* attribution result
-* confidence score
+* attribution
+* combined confidence
 * LLM score
+* stylometric score
+* stylometric metrics
 * classification status
 
-Retrieve recent entries using:
+Retrieve the log with:
 
 ```bash
 curl -s http://localhost:5001/log | python -m json.tool
 ```
 
-Example output:
+Example audit entry:
 
 ```json
 {
-    "entries": [
-        {
-            "attribution": "likely_human",
-            "confidence": 0.2,
-            "content_id": "7cc46cc4-382c-4129-a197-3b2b9ecd450b",
-            "creator_id": "test-user-1",
-            "llm_score": 0.2,
-            "status": "classified",
-            "timestamp": "2026-06-28T18:57:52.882382+00:00"
-        },
-        {
-            "attribution": "likely_human",
-            "confidence": 0.2,
-            "content_id": "8c2a5a57-1657-4c00-9fbe-265ecc0a253a",
-            "creator_id": "test-user-2",
-            "llm_score": 0.2,
-            "status": "classified",
-            "timestamp": "2026-06-28T19:02:32.934012+00:00"
-        },
-        {
-            "attribution": "likely_human",
-            "confidence": 0.0,
-            "content_id": "a41d3d2c-b88b-4d6b-8dc4-9542478e2698",
-            "creator_id": "test-user-3",
-            "llm_score": 0.0,
-            "status": "classified",
-            "timestamp": "2026-06-28T19:02:49.727146+00:00"
-        },
-        {
-            "attribution": "likely_ai",
-            "confidence": 0.8,
-            "content_id": "01ffbd56-d55e-4635-9a0e-bbc55905a717",
-            "creator_id": "test-ai-1",
-            "llm_score": 0.8,
-            "status": "classified",
-            "timestamp": "2026-06-28T19:08:34.618078+00:00"
-        }
-    ]
+    "attribution": "likely_ai",
+    "confidence": 0.68,
+    "content_id": "230a5bc1-b733-4266-9360-8bb1c4d391f2",
+    "creator_id": "test-ai-1",
+    "llm_score": 0.8,
+    "stylometric_score": 0.2,
+    "stylometric_metrics": {
+        "avg_sentence_length": 14.33,
+        "sentence_length_variance": 44.33,
+        "type_token_ratio": 0.88
+    },
+    "status": "classified"
 }
 ```
 
 ---
 
-# Detection Signal
+# Testing
 
-The first detection signal uses the **Groq Llama 3.3 70B Versatile** model.
+The detection pipeline was evaluated using four representative inputs.
 
-The submitted text is sent to the model with a prompt requesting structured JSON output containing:
+| Test Case                 | Expected Result     | Observed Result     |
+| ------------------------- | ------------------- | ------------------- |
+| Clearly AI-generated      | High confidence AI  | Likely AI (0.68)    |
+| Clearly human-written     | Low confidence      | Likely human (0.16) |
+| Borderline formal writing | Moderate confidence | Likely human (0.23) |
+| Borderline edited AI      | Moderate confidence | Likely human (0.20) |
 
-* AI-likeness score (0.0–1.0)
-* attribution (`likely_human`, `uncertain`, or `likely_ai`)
-* explanation
-
-The application parses the JSON response and includes the results in both the API response and the audit log.
+These tests demonstrate that both detection signals execute successfully and produce different confidence scores across a range of writing styles.
 
 ---
 
@@ -226,7 +254,7 @@ The application parses the JSON response and includes the results in both the AP
 
 ---
 
-# Current Progress
+# Milestone Progress
 
 Completed:
 
@@ -235,13 +263,15 @@ Completed:
 * ✅ POST `/submit`
 * ✅ GET `/log`
 * ✅ Groq LLM detection signal
-* ✅ Structured JSON responses
-* ✅ JSON audit logging
+* ✅ Stylometric detection signal
+* ✅ Combined confidence scoring
+* ✅ Structured JSON audit logging
+* ✅ Four test cases covering AI, human, and borderline inputs
 
-Upcoming milestones:
+Upcoming work:
 
-* Transparency labels
-* Second detection signal
 * Appeal endpoint
-* Final documentation and testing
+* Final transparency features
+* Final documentation
+
 
