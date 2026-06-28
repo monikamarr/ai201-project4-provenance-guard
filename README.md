@@ -2,20 +2,20 @@
 
 **AI201 – Project 4**
 
-Provenance Guard is a Flask-based REST API that estimates whether submitted text is likely human-written or AI-generated. The system combines two independent detection signals—a large language model (LLM) assessment and a stylometric analysis—to produce a single confidence score and attribution label. Every submission is recorded in a structured audit log for transparency.
+Provenance Guard is a Flask-based REST API that estimates whether submitted text is likely human-written or AI-generated. The application combines two independent detection signals—a Large Language Model (LLM) assessment and a stylometric analysis—to produce a single confidence score and attribution label. Every submission is recorded in a structured audit log for transparency and traceability.
 
 ---
 
 # Features
 
 * Flask REST API
-* POST endpoint for text attribution
-* Two independent detection signals:
+* POST endpoint for submitting text
+* Two independent detection signals
 
-  * **Groq Llama 3.3 70B Versatile**
-  * **Stylometric heuristic analysis**
+  * Groq Llama 3.3 70B Versatile
+  * Stylometric heuristic analysis
 * Combined confidence scoring
-* Three attribution categories:
+* Three attribution categories
 
   * Likely AI-generated
   * Uncertain
@@ -69,7 +69,7 @@ Run the application.
 python app.py
 ```
 
-The server runs at:
+The server runs on:
 
 ```
 http://localhost:5001
@@ -87,7 +87,7 @@ Health check endpoint.
 
 ```json
 {
-    "message": "Provenance Guard API is running."
+  "message": "Provenance Guard API is running."
 }
 ```
 
@@ -121,84 +121,31 @@ curl -s -X POST http://localhost:5001/submit \
 
 ```json
 {
-    "content_id": "230a5bc1-b733-4266-9360-8bb1c4d391f2",
-    "creator_id": "test-ai-1",
-    "attribution": "likely_ai",
-    "confidence": 0.68,
-    "label": "Likely AI-generated (combined confidence: 0.68). This result is based on an LLM signal and a stylometric signal.",
-    "signals": {
-        "llm": {
-            "score": 0.8,
-            "attribution": "likely_ai"
-        },
-        "stylometric": {
-            "score": 0.2
-        }
+  "content_id": "230a5bc1-b733-4266-9360-8bb1c4d391f2",
+  "creator_id": "test-ai-1",
+  "attribution": "likely_ai",
+  "confidence": 0.68,
+  "label": "Likely AI-generated (combined confidence: 0.68). This result is based on an LLM signal and a stylometric signal.",
+  "signals": {
+    "llm": {
+      "score": 0.8,
+      "attribution": "likely_ai"
     },
-    "status": "classified"
+    "stylometric": {
+      "score": 0.2
+    }
+  },
+  "status": "classified"
 }
 ```
 
 ---
 
-# Detection Pipeline
+## GET /log
 
-## Signal 1 — Groq LLM
+Returns the most recent audit log entries.
 
-The first detection signal uses the **Groq Llama 3.3 70B Versatile** model.
-
-The model receives submitted text and returns:
-
-* AI-likeness score
-* attribution
-* explanation
-
----
-
-## Signal 2 — Stylometric Analysis
-
-The second signal computes writing-style metrics including:
-
-* Average sentence length
-* Sentence length variance
-* Type-token ratio (vocabulary diversity)
-
-These metrics are combined into a stylometric score between **0.0** and **1.0**.
-
----
-
-## Combined Confidence
-
-The final confidence score combines both signals:
-
-* **80%** LLM score
-* **20%** stylometric score
-
-Final labels are assigned using the combined confidence:
-
-| Confidence | Attribution          |
-| ---------- | -------------------- |
-| ≥ 0.60     | Likely AI-generated  |
-| 0.40–0.59  | Uncertain            |
-| ≤ 0.39     | Likely human-written |
-
----
-
-# Audit Log
-
-Every submission creates a structured audit record containing:
-
-* content ID
-* creator ID
-* timestamp
-* attribution
-* combined confidence
-* LLM score
-* stylometric score
-* stylometric metrics
-* classification status
-
-Retrieve the log with:
+Example request:
 
 ```bash
 curl -s http://localhost:5001/log | python -m json.tool
@@ -208,41 +155,155 @@ Example audit entry:
 
 ```json
 {
-    "attribution": "likely_ai",
-    "confidence": 0.68,
-    "content_id": "230a5bc1-b733-4266-9360-8bb1c4d391f2",
-    "creator_id": "test-ai-1",
-    "llm_score": 0.8,
-    "stylometric_score": 0.2,
-    "stylometric_metrics": {
-        "avg_sentence_length": 14.33,
-        "sentence_length_variance": 44.33,
-        "type_token_ratio": 0.88
-    },
-    "status": "classified"
+  "attribution": "likely_ai",
+  "confidence": 0.68,
+  "content_id": "230a5bc1-b733-4266-9360-8bb1c4d391f2",
+  "creator_id": "test-ai-1",
+  "llm_score": 0.8,
+  "stylometric_score": 0.2,
+  "stylometric_metrics": {
+    "avg_sentence_length": 14.33,
+    "sentence_length_variance": 44.33,
+    "type_token_ratio": 0.88
+  },
+  "status": "classified"
 }
 ```
 
 ---
 
-# Testing
+# Detection Pipeline
 
-The detection pipeline was evaluated using four representative inputs.
+## Signal 1 — Groq LLM
 
-| Test Case                 | Expected Result     | Observed Result     |
-| ------------------------- | ------------------- | ------------------- |
-| Clearly AI-generated      | High confidence AI  | Likely AI (0.68)    |
-| Clearly human-written     | Low confidence      | Likely human (0.16) |
-| Borderline formal writing | Moderate confidence | Likely human (0.23) |
-| Borderline edited AI      | Moderate confidence | Likely human (0.20) |
+The first detection signal uses the **Groq Llama 3.3 70B Versatile** model. Submitted text is analyzed by the LLM, which returns:
 
-These tests demonstrate that both detection signals execute successfully and produce different confidence scores across a range of writing styles.
+* AI-likeness score (0.0–1.0)
+* Attribution
+* Explanation
+
+---
+
+## Signal 2 — Stylometric Analysis
+
+The second detection signal computes simple writing-style metrics:
+
+* Average sentence length
+* Sentence length variance
+* Type-token ratio (vocabulary diversity)
+
+These metrics are combined into a stylometric score between 0.0 and 1.0.
+
+---
+
+## Combined Confidence
+
+The final confidence score combines both signals.
+
+* **80%** LLM score
+* **20%** Stylometric score
+
+Confidence is mapped to the following labels:
+
+| Combined Score | Attribution          |
+| -------------: | -------------------- |
+|         ≥ 0.60 | Likely AI-generated  |
+|    0.40 – 0.59 | Uncertain            |
+|         ≤ 0.39 | Likely human-written |
+
+---
+
+# Milestone 4 Testing
+
+The combined detection pipeline was evaluated using four representative inputs.
+
+---
+
+## Test 1 — Clearly AI-generated
+
+### Input
+
+```text
+Artificial intelligence represents a transformative paradigm shift in modern society. It is important to note that while the benefits of AI are numerous, it is equally essential to consider the ethical implications. Furthermore, stakeholders across various sectors must collaborate to ensure responsible deployment.
+```
+
+### Result
+
+| Metric              |               Value |
+| ------------------- | ------------------: |
+| Attribution         | Likely AI-generated |
+| LLM Score           |                0.80 |
+| Stylometric Score   |                0.20 |
+| Combined Confidence |                0.68 |
+
+---
+
+## Test 2 — Clearly Human-written
+
+### Input
+
+```text
+ok so i finally tried that new ramen place downtown and honestly? underwhelming. the broth was fine but they put WAY too much sodium in it and i was thirsty for like three hours after. my friend got the spicy version and said it was better. probably wont go back unless someone drags me there
+```
+
+### Result
+
+| Metric              |                Value |
+| ------------------- | -------------------: |
+| Attribution         | Likely human-written |
+| LLM Score           |                 0.20 |
+| Stylometric Score   |                 0.00 |
+| Combined Confidence |                 0.16 |
+
+---
+
+## Test 3 — Borderline Formal Human Writing
+
+### Input
+
+```text
+The relationship between monetary policy and asset price inflation has been extensively studied in the literature. Central banks face a fundamental tension between their mandate for price stability and the unintended consequences of prolonged low interest rates on equity and real estate valuations.
+```
+
+### Result
+
+| Metric              |                Value |
+| ------------------- | -------------------: |
+| Attribution         | Likely human-written |
+| LLM Score           |                 0.20 |
+| Stylometric Score   |                 0.35 |
+| Combined Confidence |                 0.23 |
+
+---
+
+## Test 4 — Borderline Edited AI Output
+
+### Input
+
+```text
+I have been thinking a lot about remote work lately. There are genuine tradeoffs between flexibility and isolation. Studies show productivity varies widely depending on the individual, the organization, and the type of work being performed.
+```
+
+### Result
+
+| Metric              |                Value |
+| ------------------- | -------------------: |
+| Attribution         | Likely human-written |
+| LLM Score           |                 0.20 |
+| Stylometric Score   |                 0.20 |
+| Combined Confidence |                 0.20 |
+
+---
+
+## Discussion
+
+The four test cases demonstrate that the combined scoring pipeline produces different confidence values for different writing styles. The clearly AI-generated example received the highest confidence score and was classified as **Likely AI-generated**, while the conversational human-written example received the lowest confidence score. The two borderline cases produced intermediate confidence values, illustrating how the stylometric heuristics influence—but do not dominate—the final decision.
 
 ---
 
 # Project Structure
 
-```
+```text
 .
 ├── app.py
 ├── planning.md
@@ -266,12 +327,10 @@ Completed:
 * ✅ Stylometric detection signal
 * ✅ Combined confidence scoring
 * ✅ Structured JSON audit logging
-* ✅ Four test cases covering AI, human, and borderline inputs
+* ✅ Four required test cases
 
-Upcoming work:
+Upcoming:
 
 * Appeal endpoint
 * Final transparency features
-* Final documentation
-
-
+* Final project documentation
