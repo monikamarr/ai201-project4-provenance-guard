@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify
 from groq import Groq
 from dotenv import load_dotenv
 from datetime import datetime, timezone
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import os
 import json
 import uuid
@@ -12,16 +14,40 @@ load_dotenv()
 
 app = Flask(__name__)
 
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[],
+    storage_uri="memory://",
+)
+
 LOG_FILE = "audit_log.json"
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 
-def classify_with_groq(text):
-    """
-    First detection signal:
-    Uses Groq LLM to return an AI-likeness score from 0.0 to 1.0.
-    """
+def generate_transparency_label(confidence, attribution):
+    if confidence >= 0.60:
+        return (
+            f"Likely AI-generated (combined confidence: {confidence:.2f}). "
+            "This classification is based on a high AI-likeness score from the LLM signal, "
+            "supported by stylometric analysis. The result is not final and may be appealed."
+        )
 
+    if confidence <= 0.39:
+        return (
+            f"Likely human-written (combined confidence: {confidence:.2f}). "
+            "This classification is based on a low AI-likeness score from the combined detection signals. "
+            "The result is not final and may be appealed."
+        )
+
+    return (
+        f"Uncertain origin (combined confidence: {confidence:.2f}). "
+        "The detection signals did not provide enough confidence to classify the text as clearly human-written "
+        "or AI-generated. Human review may be needed."
+    )
+
+
+def classify_with_groq(text):
     prompt = f"""
 You are an AI-content attribution assistant.
 
@@ -47,9 +73,7 @@ Text:
 
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "user", "content": prompt}
-        ],
+        messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
     )
 
@@ -86,15 +110,8 @@ Text:
 
 
 def stylometric_signal(text):
-    """
-    Second detection signal:
-    Uses simple writing-style metrics to estimate AI-likeness.
-    Higher score = more AI-like.
-    """
-
     sentences = re.split(r"[.!?]+", text)
     sentences = [s.strip() for s in sentences if s.strip()]
-
     words = re.findall(r"\b\w+\b", text.lower())
 
     if not words or not sentences:
@@ -152,23 +169,17 @@ def stylometric_signal(text):
 
 
 def combine_signals(llm_score, stylometric_score):
-    """
-    Combines both signals into one confidence score.
-    LLM signal is weighted more heavily because it is the primary detector.
-    """
-
     combined_score = (0.8 * llm_score) + (0.2 * stylometric_score)
     combined_score = round(combined_score, 2)
 
     if combined_score >= 0.6:
         attribution = "likely_ai"
-        label = "Likely AI-generated"
     elif combined_score <= 0.39:
         attribution = "likely_human"
-        label = "Likely human-written"
     else:
         attribution = "uncertain"
-        label = "Uncertain origin"
+
+    label = generate_transparency_label(combined_score, attribution)
 
     return {
         "confidence": combined_score,
@@ -197,6 +208,7 @@ def add_log_entry(entry):
 
 
 @app.route("/submit", methods=["POST"])
+@limiter.limit("10 per minute;100 per day")
 def submit():
     data = request.get_json()
 
@@ -233,12 +245,7 @@ def submit():
 
     confidence = combined_result["confidence"]
     attribution = combined_result["attribution"]
-
-    label = (
-        f"{combined_result['label']} "
-        f"(combined confidence: {confidence:.2f}). "
-        "This result is based on an LLM signal and a stylometric signal."
-    )
+    label = combined_result["label"]
 
     response = {
         "content_id": content_id,
@@ -258,24 +265,85 @@ def submit():
                 "explanation": stylometric_result["explanation"]
             }
         },
-        "status": "classified"
+        "status": "classified",
+        "appeal_filed": False
     }
 
     log_entry = {
+        "event_type": "classification",
         "content_id": content_id,
         "creator_id": creator_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "attribution": attribution,
         "confidence": confidence,
+        "label": label,
         "llm_score": llm_result["score"],
         "stylometric_score": stylometric_result["score"],
         "stylometric_metrics": stylometric_result["metrics"],
-        "status": "classified"
+        "status": "classified",
+        "appeal_filed": False,
+        "appeal_reasoning": None
     }
 
     add_log_entry(log_entry)
 
     return jsonify(response), 200
+
+
+@app.route("/appeal", methods=["POST"])
+def appeal():
+    data = request.get_json()
+
+    if not data:
+        return jsonify({"error": "Request body must be JSON."}), 400
+
+    content_id = data.get("content_id")
+    creator_reasoning = data.get("creator_reasoning")
+
+    if not content_id:
+        return jsonify({"error": "Missing required field: content_id"}), 400
+
+    if not creator_reasoning or not creator_reasoning.strip():
+        return jsonify({"error": "Missing required field: creator_reasoning"}), 400
+
+    entries = load_log()
+
+    original_entry = None
+    for entry in entries:
+        if entry.get("content_id") == content_id and entry.get("event_type") == "classification":
+            original_entry = entry
+            break
+
+    if not original_entry:
+        return jsonify({"error": "No classification found for that content_id."}), 404
+
+    original_entry["status"] = "under_review"
+    original_entry["appeal_filed"] = True
+    original_entry["appeal_reasoning"] = creator_reasoning
+
+    appeal_entry = {
+        "event_type": "appeal",
+        "content_id": content_id,
+        "creator_id": original_entry.get("creator_id"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "original_attribution": original_entry.get("attribution"),
+        "original_confidence": original_entry.get("confidence"),
+        "llm_score": original_entry.get("llm_score"),
+        "stylometric_score": original_entry.get("stylometric_score"),
+        "status": "under_review",
+        "appeal_filed": True,
+        "appeal_reasoning": creator_reasoning
+    }
+
+    entries.append(appeal_entry)
+    save_log(entries)
+
+    return jsonify({
+        "message": "Appeal received. The content is now under review.",
+        "content_id": content_id,
+        "status": "under_review",
+        "appeal_reasoning": creator_reasoning
+    }), 200
 
 
 @app.route("/log", methods=["GET"])

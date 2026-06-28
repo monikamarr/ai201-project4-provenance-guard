@@ -315,22 +315,32 @@ The four test cases demonstrate that the combined scoring pipeline produces diff
 
 ---
 
-# Milestone Progress
+## Rate Limiting
 
-Completed:
+The `/submit` endpoint is protected using Flask-Limiter.
 
-* ✅ Planning document
-* ✅ Flask application
-* ✅ POST `/submit`
-* ✅ GET `/log`
-* ✅ Groq LLM detection signal
-* ✅ Stylometric detection signal
-* ✅ Combined confidence scoring
-* ✅ Structured JSON audit logging
-* ✅ Four required test cases
+Limits:
 
-Upcoming:
+- 10 submissions per minute
+- 100 submissions per day
 
-* Appeal endpoint
-* Final transparency features
-* Final project documentation
+These limits allow normal use by individual writers while helping prevent automated abuse.
+
+### Test Results
+
+```text
+200
+200
+200
+200
+200
+200
+200
+200
+200
+200
+429
+429
+```
+
+The first ten requests succeeded. The final two requests exceeded the configured limit and returned HTTP 429 (Too Many Requests).
